@@ -1,0 +1,8 @@
+telegram:
+  bot:
+    username: ${TELEGRAM_BOT_USERNAME:YourBotUsername}
+    token: ${TELEGRAM_BOT_TOKEN:YourBotToken}
+
+serial:
+  port: ${SERIAL_PORT:COM4}
+  baudRate: 115200

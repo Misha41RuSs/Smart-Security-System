@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}
+      - SERIAL_PORT=${SERIAL_PORT:-COM4}
+    devices:
+      # На Windows доступ к COM портам через Docker может потребовать дополнительных настроек.
+      # Если вы запускаете локально на Windows, лучше использовать Maven/IDE напрямую.
+      # На Linux это будет выглядеть как /dev/ttyUSB0
+      - "/dev/ttyS4:/dev/ttyS4" # Пример проброса COM4, может отличаться
+    restart: unless-stopped
