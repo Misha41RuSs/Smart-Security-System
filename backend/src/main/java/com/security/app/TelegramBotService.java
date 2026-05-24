@@ -1,15 +1,23 @@
 package com.security.app;
 
+import com.security.app.entity.CommandLog;
+import com.security.app.entity.SecurityEvent;
+import com.security.app.entity.Subscriber;
+import com.security.app.repository.CommandLogRepository;
+import com.security.app.repository.SecurityEventRepository;
+import com.security.app.repository.SubscriberRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
-import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-
+import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,12 +28,22 @@ public class TelegramBotService extends TelegramLongPollingBot {
     private final String botUsername;
     private SerialService serialService;
 
+    private final SubscriberRepository subscriberRepository;
+    private final CommandLogRepository commandLogRepository;
+    private final SecurityEventRepository securityEventRepository;
+
     public TelegramBotService(AppState appState,
                               @Value("${telegram.bot.token}") String botToken,
-                              @Value("${telegram.bot.username}") String botUsername) {
+                              @Value("${telegram.bot.username}") String botUsername,
+                              SubscriberRepository subscriberRepository,
+                              CommandLogRepository commandLogRepository,
+                              SecurityEventRepository securityEventRepository) {
         super(botToken);
         this.appState = appState;
         this.botUsername = botUsername;
+        this.subscriberRepository = subscriberRepository;
+        this.commandLogRepository = commandLogRepository;
+        this.securityEventRepository = securityEventRepository;
     }
 
     public void setSerialService(SerialService serialService) {
@@ -39,34 +57,95 @@ public class TelegramBotService extends TelegramLongPollingBot {
             Long chatId = update.getMessage().getChatId();
 
             if (text.startsWith("/start")) {
+                User from = update.getMessage().getFrom();
+                String username = from.getUserName();
+                String firstName = from.getFirstName();
+                String lastName = from.getLastName();
+                
+                try {
+                    Subscriber sub = subscriberRepository.findById(chatId).orElse(
+                        Subscriber.builder()
+                            .chatId(chatId)
+                            .subscribedAt(LocalDateTime.now())
+                            .build()
+                    );
+                    sub.setUsername(username);
+                    sub.setFirstName(firstName);
+                    sub.setLastName(lastName);
+                    sub.setActive(true);
+                    subscriberRepository.save(sub);
+                } catch (Exception e) {
+                    System.err.println("Ошибка сохранения подписчика: " + e.getMessage());
+                }
+                
                 appState.addChatId(chatId);
                 sendMessage(chatId, "Добро пожаловать в систему охраны! Вы подписаны на уведомления.\nИспользуйте кнопки меню для управления.");
+                logCommand(update, "/start", true);
+
             } else if (text.startsWith("/stop")) {
+                try {
+                    subscriberRepository.findById(chatId).ifPresent(sub -> {
+                        sub.setActive(false);
+                        subscriberRepository.save(sub);
+                    });
+                } catch (Exception e) {
+                    System.err.println("Ошибка деактивации подписчика: " + e.getMessage());
+                }
+                
                 appState.removeChatId(chatId);
                 sendMessage(chatId, "Вы отписались от уведомлений.");
+                logCommand(update, "/stop", true);
+
             } else if (text.startsWith("/arm") || text.equals("🚨 Включить охрану")) {
+                boolean success = false;
                 if (serialService != null) {
                     serialService.sendCommand("ARM");
                     sendMessage(chatId, "Команда ARM отправлена на устройство.");
+                    success = true;
+                } else {
+                    sendMessage(chatId, "Ошибка: Устройство не подключено.");
                 }
+                logCommand(update, text, success);
+
             } else if (text.startsWith("/disarm") || text.equals("🔕 Выключить охрану")) {
+                boolean success = false;
                 if (serialService != null) {
                     serialService.sendCommand("DISARM");
                     sendMessage(chatId, "Команда DISARM отправлена на устройство.");
+                    success = true;
+                } else {
+                    sendMessage(chatId, "Ошибка: Устройство не подключено.");
                 }
+                logCommand(update, text, success);
+
             } else if (text.startsWith("/police") || text.equals("👮‍♂️ Режим Сирены")) {
+                boolean success = false;
                 if (serialService != null) {
                     serialService.sendCommand("POLICE");
                     sendMessage(chatId, "🚨 РЕЖИМ СИРЕНЫ АКТИВИРОВАН!");
+                    success = true;
+                } else {
+                    sendMessage(chatId, "Ошибка: Устройство не подключено.");
                 }
+                logCommand(update, text, success);
+
             } else if (text.startsWith("/nopolice") || text.equals("🛑 Выкл Сирену")) {
+                boolean success = false;
                 if (serialService != null) {
                     serialService.sendCommand("NOPOLICE");
                     sendMessage(chatId, "Режим Сирены отключен.");
+                    success = true;
+                } else {
+                    sendMessage(chatId, "Ошибка: Устройство не подключено.");
                 }
+                logCommand(update, text, success);
+
             } else if (text.startsWith("/status") || text.equals("📊 Статус")) {
                 sendMessage(chatId, "Текущие пороги:\nДистанция: " + appState.getDistanceThreshold() + " см\nСвет: " + appState.getLightThreshold());
+                logCommand(update, text, true);
+
             } else if (text.startsWith("/setdist ")) {
+                boolean success = false;
                 try {
                     double dist = Double.parseDouble(text.replace("/setdist ", ""));
                     appState.setDistanceThreshold(dist);
@@ -74,10 +153,14 @@ public class TelegramBotService extends TelegramLongPollingBot {
                         serialService.sendCommand("DIST:" + dist);
                     }
                     sendMessage(chatId, "Порог дистанции установлен на " + dist + " см.");
+                    success = true;
                 } catch (Exception e) {
                     sendMessage(chatId, "Ошибка: неверный формат числа.");
                 }
+                logCommand(update, text, success);
+
             } else if (text.startsWith("/setlight ")) {
+                boolean success = false;
                 try {
                     int light = Integer.parseInt(text.replace("/setlight ", ""));
                     appState.setLightThreshold(light);
@@ -85,9 +168,81 @@ public class TelegramBotService extends TelegramLongPollingBot {
                         serialService.sendCommand("LIGHT:" + light);
                     }
                     sendMessage(chatId, "Порог света установлен на " + light + ".");
+                    success = true;
                 } catch (Exception e) {
                     sendMessage(chatId, "Ошибка: неверный формат числа.");
                 }
+                logCommand(update, text, success);
+
+            } else if (text.startsWith("/history") || text.equals("📜 История событий")) {
+                boolean success = false;
+                try {
+                    List<SecurityEvent> events = securityEventRepository.findTop5ByOrderByTimestampDesc();
+                    if (events.isEmpty()) {
+                        sendMessage(chatId, "📭 Событий тревоги пока не зафиксировано.");
+                    } else {
+                        StringBuilder sb = new StringBuilder("📋 *Последние 5 тревожных событий:*\n\n");
+                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
+                        for (SecurityEvent event : events) {
+                            sb.append("⏳ *").append(event.getTimestamp().format(formatter)).append("*\n")
+                              .append("🔹 Тип: ").append(event.getEventType()).append("\n")
+                              .append("📊 Значение: ").append(event.getValue()).append("\n")
+                              .append("📝 ").append(event.getMessage()).append("\n\n");
+                        }
+                        sendMessageMarkdown(chatId, sb.toString());
+                    }
+                    success = true;
+                } catch (Exception e) {
+                    sendMessage(chatId, "Ошибка при получении истории: " + e.getMessage());
+                }
+                logCommand(update, text, success);
+
+            } else if (text.startsWith("/stats") || text.equals("📈 Статистика")) {
+                boolean success = false;
+                try {
+                    long totalAlerts = securityEventRepository.count();
+                    LocalDateTime startOfDay = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
+                    long alertsToday = securityEventRepository.countByTimestampAfter(startOfDay);
+                    long totalUsers = subscriberRepository.count();
+                    long activeUsers = subscriberRepository.findByActiveTrue().size();
+
+                    String statsMessage = "📈 *Статистика системы охраны:*\n\n" +
+                            "🚨 Зафиксировано тревог (всего): *" + totalAlerts + "*\n" +
+                            "📅 Тревог за сегодня: *" + alertsToday + "*\n" +
+                            "👥 Всего пользователей: *" + totalUsers + "*\n" +
+                            "🟢 Активных подписчиков: *" + activeUsers + "*\n" +
+                            "⚙️ Порог дистанции: *" + appState.getDistanceThreshold() + " см*\n" +
+                            "💡 Порог света: *" + appState.getLightThreshold() + "*";
+                    
+                    sendMessageMarkdown(chatId, statsMessage);
+                    success = true;
+                } catch (Exception e) {
+                    sendMessage(chatId, "Ошибка при формировании статистики: " + e.getMessage());
+                }
+                logCommand(update, text, success);
+
+            } else if (text.startsWith("/users") || text.equals("👥 Пользователи")) {
+                boolean success = false;
+                try {
+                    List<Subscriber> subs = subscriberRepository.findAll();
+                    if (subs.isEmpty()) {
+                        sendMessage(chatId, "👥 В базе данных пока нет пользователей.");
+                    } else {
+                        StringBuilder sb = new StringBuilder("👥 *Зарегистрированные пользователи:*\n\n");
+                        for (Subscriber sub : subs) {
+                            sb.append(sub.isActive() ? "🟢 " : "🔴 ")
+                              .append(sub.getFirstName() != null ? sub.getFirstName() : "").append(" ")
+                              .append(sub.getLastName() != null ? sub.getLastName() : "")
+                              .append(sub.getUsername() != null ? " (@" + sub.getUsername() + ")" : "")
+                              .append("\nID: `").append(sub.getChatId()).append("`\n\n");
+                        }
+                        sendMessageMarkdown(chatId, sb.toString());
+                    }
+                    success = true;
+                } catch (Exception e) {
+                    sendMessage(chatId, "Ошибка при получении списка пользователей: " + e.getMessage());
+                }
+                logCommand(update, text, success);
             }
         }
     }
@@ -98,11 +253,51 @@ public class TelegramBotService extends TelegramLongPollingBot {
         }
     }
 
+    private void logCommand(Update update, String command, boolean success) {
+        try {
+            Long chatId = update.getMessage().getChatId();
+            String username = update.getMessage().getFrom().getUserName();
+            CommandLog log = CommandLog.builder()
+                .timestamp(LocalDateTime.now())
+                .chatId(chatId)
+                .username(username)
+                .command(command)
+                .success(success)
+                .build();
+            commandLogRepository.save(log);
+        } catch (Exception e) {
+            System.err.println("Ошибка сохранения лога команды: " + e.getMessage());
+        }
+    }
+
     private void sendMessage(Long chatId, String text) {
         SendMessage message = new SendMessage();
         message.setChatId(String.valueOf(chatId));
         message.setText(text);
+        message.setReplyMarkup(createKeyboard());
 
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendMessageMarkdown(Long chatId, String text) {
+        SendMessage message = new SendMessage();
+        message.setChatId(String.valueOf(chatId));
+        message.setText(text);
+        message.setParseMode("Markdown");
+        message.setReplyMarkup(createKeyboard());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private ReplyKeyboardMarkup createKeyboard() {
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
         keyboardMarkup.setResizeKeyboard(true);
         List<KeyboardRow> keyboard = new ArrayList<>();
@@ -117,19 +312,18 @@ public class TelegramBotService extends TelegramLongPollingBot {
         
         KeyboardRow row3 = new KeyboardRow();
         row3.add("📊 Статус");
+        row3.add("📜 История событий");
+        
+        KeyboardRow row4 = new KeyboardRow();
+        row4.add("📈 Статистика");
+        row4.add("👥 Пользователи");
 
         keyboard.add(row1);
         keyboard.add(row2);
         keyboard.add(row3);
+        keyboard.add(row4);
         keyboardMarkup.setKeyboard(keyboard);
-        
-        message.setReplyMarkup(keyboardMarkup);
-
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
+        return keyboardMarkup;
     }
 
     @Override
