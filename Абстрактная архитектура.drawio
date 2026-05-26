@@ -1,0 +1,70 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17">
+  <diagram name="Страница — 1" id="C8vJZYTN2WJ5Iu8cVvc5">
+    <mxGraphModel dx="1185" dy="683" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--1" value="Tg Bot API (клиентский UI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="239" y="37" width="238" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="147" y="173" width="422" height="259" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--3" value="Spring Boot Backend (управляющий сервер)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="241" y="173" width="274" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--4" value="TelegramBotService" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="189" y="233" width="120" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--5" value="Data Access Layer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="189" y="343" width="120" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--6" value="Serial Service" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="407" y="267" width="120" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--7" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.429;entryY=0.038;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="RkI0sdsvzmd6vZ62Pt1--1" target="RkI0sdsvzmd6vZ62Pt1--3">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="61" y="200" as="sourcePoint" />
+            <mxPoint x="111" y="150" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--8" value="HTTPS (JSON)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="357" y="117" width="104" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--9" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="RkI0sdsvzmd6vZ62Pt1--4" target="RkI0sdsvzmd6vZ62Pt1--5">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="29" y="432" as="sourcePoint" />
+            <mxPoint x="79" y="382" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--10" value="JPA / JDBC" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="235" y="296" width="104" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--12" value="Postgres (Docker)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="172" y="474" width="167" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--13" value="ESP32 Board" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCCCCC;strokeColor=#90978c;" vertex="1" parent="1">
+          <mxGeometry x="383.5" y="474" width="167" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--14" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="RkI0sdsvzmd6vZ62Pt1--6" target="RkI0sdsvzmd6vZ62Pt1--13">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="550" y="471" as="sourcePoint" />
+            <mxPoint x="600" y="421" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--15" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.466;entryY=-0.017;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="RkI0sdsvzmd6vZ62Pt1--5" target="RkI0sdsvzmd6vZ62Pt1--12">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="107" y="567" as="sourcePoint" />
+            <mxPoint x="157" y="517" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--16" value="TCP (Port 5435)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="249" y="435" width="104" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="RkI0sdsvzmd6vZ62Pt1--17" value="UART (Serial)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="458" y="355" width="104" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

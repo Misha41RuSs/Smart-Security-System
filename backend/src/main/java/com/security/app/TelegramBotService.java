@@ -20,6 +20,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class TelegramBotService extends TelegramLongPollingBot {
@@ -31,6 +34,11 @@ public class TelegramBotService extends TelegramLongPollingBot {
     private final SubscriberRepository subscriberRepository;
     private final CommandLogRepository commandLogRepository;
     private final SecurityEventRepository securityEventRepository;
+
+    // Сеты для отслеживания пользователей, находящихся в процессе изменения настроек
+    private final Set<Long> awaitingPasswordChatIds = ConcurrentHashMap.newKeySet();
+    private final Set<Long> awaitingDistanceChatIds = ConcurrentHashMap.newKeySet();
+    private final Set<Long> awaitingLightChatIds = ConcurrentHashMap.newKeySet();
 
     public TelegramBotService(AppState appState,
                               @Value("${telegram.bot.token}") String botToken,
@@ -55,6 +63,88 @@ public class TelegramBotService extends TelegramLongPollingBot {
         if (update.hasMessage() && update.getMessage().hasText()) {
             String text = update.getMessage().getText();
             Long chatId = update.getMessage().getChatId();
+
+            // Если пришел клик по кнопкам меню, сбрасываем состояние ожидания ввода
+            if (text.equals("🚨 Включить охрану") || text.equals("🔕 Выключить охрану") ||
+                text.equals("👮‍♂️ Режим Сирены") || text.equals("🛑 Выкл Сирену") ||
+                text.equals("📊 Статус") || text.equals("📜 История событий") ||
+                text.equals("📈 Статистика") || text.equals("👥 Пользователи") ||
+                text.equals("⚙️ Уст. дистанцию") || text.equals("⚙️ Уст. порог света") ||
+                text.equals("🔑 Вход в админку") || text.equals("🔑 Выйти из админки")) {
+                awaitingPasswordChatIds.remove(chatId);
+                awaitingDistanceChatIds.remove(chatId);
+                awaitingLightChatIds.remove(chatId);
+            }
+
+            // Обработка ввода пароля админки
+            if (awaitingPasswordChatIds.contains(chatId)) {
+                awaitingPasswordChatIds.remove(chatId);
+                boolean success = false;
+                if ("12345".equals(text.trim())) {
+                    try {
+                        Subscriber sub = subscriberRepository.findById(chatId).orElse(
+                            Subscriber.builder()
+                                .chatId(chatId)
+                                .subscribedAt(LocalDateTime.now())
+                                .active(true)
+                                .build()
+                        );
+                        sub.setAdmin(true);
+                        subscriberRepository.save(sub);
+                        
+                        sendMessage(chatId, "🔑 Авторизация успешна! Вы вошли в режим Администратора.\nТеперь вам доступны кнопки изменения порогов датчиков.");
+                        success = true;
+                    } catch (Exception e) {
+                        sendMessage(chatId, "Ошибка при сохранении статуса администратора: " + e.getMessage());
+                    }
+                } else {
+                    sendMessage(chatId, "🔴 Неверный пароль! Доступ в админку запрещен.");
+                }
+                logCommand(update, "[Ввод пароля админки]", success);
+                return;
+            }
+
+            // Обработка ввода новой дистанции
+            if (awaitingDistanceChatIds.contains(chatId)) {
+                awaitingDistanceChatIds.remove(chatId);
+                boolean success = false;
+                try {
+                    double dist = Double.parseDouble(text.trim());
+                    appState.setDistanceThreshold(dist);
+                    if (serialService != null) {
+                        serialService.sendCommand("DIST:" + dist);
+                    }
+                    sendMessage(chatId, "⚙️ Порог дистанции успешно установлен на " + dist + " см.");
+                    success = true;
+                } catch (Exception e) {
+                    sendMessage(chatId, "🔴 Ошибка: Неверный формат числа! Введите число (например, 7.5).");
+                }
+                logCommand(update, "[Установка дистанции: " + text + "]", success);
+                return;
+            }
+
+            // Обработка ввода нового порога света
+            if (awaitingLightChatIds.contains(chatId)) {
+                awaitingLightChatIds.remove(chatId);
+                boolean success = false;
+                try {
+                    int light = Integer.parseInt(text.trim());
+                    appState.setLightThreshold(light);
+                    if (serialService != null) {
+                        serialService.sendCommand("LIGHT:" + light);
+                    }
+                    sendMessage(chatId, "⚙️ Порог освещенности успешно установлен на " + light + ".");
+                    success = true;
+                } catch (Exception e) {
+                    sendMessage(chatId, "🔴 Ошибка: Неверный формат целого числа! Введите число (например, 900).");
+                }
+                logCommand(update, "[Установка света: " + text + "]", success);
+                return;
+            }
+
+            // Загружаем статус пользователя из БД
+            Optional<Subscriber> subOpt = subscriberRepository.findById(chatId);
+            boolean isAdmin = subOpt.map(Subscriber::isAdmin).orElse(false);
 
             if (text.startsWith("/start")) {
                 User from = update.getMessage().getFrom();
@@ -86,6 +176,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
                 try {
                     subscriberRepository.findById(chatId).ifPresent(sub -> {
                         sub.setActive(false);
+                        sub.setAdmin(false); // Сбрасываем админа при отписке
                         subscriberRepository.save(sub);
                     });
                 } catch (Exception e) {
@@ -145,6 +236,11 @@ public class TelegramBotService extends TelegramLongPollingBot {
                 logCommand(update, text, true);
 
             } else if (text.startsWith("/setdist ")) {
+                if (!isAdmin) {
+                    sendMessage(chatId, "🚫 Доступ запрещен! Эта команда доступна только администраторам. Авторизуйтесь по кнопке '🔑 Вход в админку'.");
+                    logCommand(update, text, false);
+                    return;
+                }
                 boolean success = false;
                 try {
                     double dist = Double.parseDouble(text.replace("/setdist ", ""));
@@ -160,6 +256,11 @@ public class TelegramBotService extends TelegramLongPollingBot {
                 logCommand(update, text, success);
 
             } else if (text.startsWith("/setlight ")) {
+                if (!isAdmin) {
+                    sendMessage(chatId, "🚫 Доступ запрещен! Эта команда доступна только администраторам. Авторизуйтесь по кнопке '🔑 Вход в админку'.");
+                    logCommand(update, text, false);
+                    return;
+                }
                 boolean success = false;
                 try {
                     int light = Integer.parseInt(text.replace("/setlight ", ""));
@@ -222,6 +323,11 @@ public class TelegramBotService extends TelegramLongPollingBot {
                 logCommand(update, text, success);
 
             } else if (text.startsWith("/users") || text.equals("👥 Пользователи")) {
+                if (!isAdmin) {
+                    sendMessage(chatId, "🚫 Доступ запрещен! Эта команда доступна только администраторам. Авторизуйтесь по кнопке '🔑 Вход в админку'.");
+                    logCommand(update, text, false);
+                    return;
+                }
                 boolean success = false;
                 try {
                     List<Subscriber> subs = subscriberRepository.findAll();
@@ -231,6 +337,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
                         StringBuilder sb = new StringBuilder("👥 *Зарегистрированные пользователи:*\n\n");
                         for (Subscriber sub : subs) {
                             sb.append(sub.isActive() ? "🟢 " : "🔴 ")
+                              .append(sub.isAdmin() ? "👑 [Админ] " : "👤 [Юзер] ")
                               .append(sub.getFirstName() != null ? sub.getFirstName() : "").append(" ")
                               .append(sub.getLastName() != null ? sub.getLastName() : "")
                               .append(sub.getUsername() != null ? " (@" + sub.getUsername() + ")" : "")
@@ -243,6 +350,43 @@ public class TelegramBotService extends TelegramLongPollingBot {
                     sendMessage(chatId, "Ошибка при получении списка пользователей: " + e.getMessage());
                 }
                 logCommand(update, text, success);
+
+            } else if (text.equals("🔑 Вход в админку")) {
+                awaitingPasswordChatIds.add(chatId);
+                sendMessage(chatId, "🔑 Введите пароль администратора для авторизации:");
+                logCommand(update, text, true);
+
+            } else if (text.equals("🔑 Выйти из админки")) {
+                try {
+                    subscriberRepository.findById(chatId).ifPresent(sub -> {
+                        sub.setAdmin(false);
+                        subscriberRepository.save(sub);
+                    });
+                    sendMessage(chatId, "👤 Вы вышли из режима Администратора. Доступ к настройкам закрыт.");
+                } catch (Exception e) {
+                    sendMessage(chatId, "Ошибка при выходе из админки: " + e.getMessage());
+                }
+                logCommand(update, text, true);
+
+            } else if (text.equals("⚙️ Уст. дистанцию")) {
+                if (!isAdmin) {
+                    sendMessage(chatId, "🚫 Доступ запрещен! Эта функция доступна только администраторам.");
+                    logCommand(update, text, false);
+                    return;
+                }
+                awaitingDistanceChatIds.add(chatId);
+                sendMessage(chatId, "⚙️ Введите новый порог дистанции в сантиметрах (например, 6.5):");
+                logCommand(update, text, true);
+
+            } else if (text.equals("⚙️ Уст. порог света")) {
+                if (!isAdmin) {
+                    sendMessage(chatId, "🚫 Доступ запрещен! Эта функция доступна только администраторам.");
+                    logCommand(update, text, false);
+                    return;
+                }
+                awaitingLightChatIds.add(chatId);
+                sendMessage(chatId, "⚙️ Введите новый порог освещенности (целое число, например, 950):");
+                logCommand(update, text, true);
             }
         }
     }
@@ -270,11 +414,19 @@ public class TelegramBotService extends TelegramLongPollingBot {
         }
     }
 
+    private boolean isUserAdmin(Long chatId) {
+        try {
+            return subscriberRepository.findById(chatId).map(Subscriber::isAdmin).orElse(false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private void sendMessage(Long chatId, String text) {
         SendMessage message = new SendMessage();
         message.setChatId(String.valueOf(chatId));
         message.setText(text);
-        message.setReplyMarkup(createKeyboard());
+        message.setReplyMarkup(createKeyboard(isUserAdmin(chatId)));
 
         try {
             execute(message);
@@ -288,7 +440,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
         message.setChatId(String.valueOf(chatId));
         message.setText(text);
         message.setParseMode("Markdown");
-        message.setReplyMarkup(createKeyboard());
+        message.setReplyMarkup(createKeyboard(isUserAdmin(chatId)));
 
         try {
             execute(message);
@@ -297,7 +449,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
         }
     }
 
-    private ReplyKeyboardMarkup createKeyboard() {
+    private ReplyKeyboardMarkup createKeyboard(boolean isAdmin) {
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
         keyboardMarkup.setResizeKeyboard(true);
         List<KeyboardRow> keyboard = new ArrayList<>();
@@ -316,12 +468,31 @@ public class TelegramBotService extends TelegramLongPollingBot {
         
         KeyboardRow row4 = new KeyboardRow();
         row4.add("📈 Статистика");
-        row4.add("👥 Пользователи");
+        if (isAdmin) {
+            row4.add("👥 Пользователи");
+            
+            KeyboardRow row5 = new KeyboardRow();
+            row5.add("⚙️ Уст. дистанцию");
+            row5.add("⚙️ Уст. порог света");
+            
+            KeyboardRow row6 = new KeyboardRow();
+            row6.add("🔑 Выйти из админки");
+            
+            keyboard.add(row1);
+            keyboard.add(row2);
+            keyboard.add(row3);
+            keyboard.add(row4);
+            keyboard.add(row5);
+            keyboard.add(row6);
+        } else {
+            row4.add("🔑 Вход в админку");
+            
+            keyboard.add(row1);
+            keyboard.add(row2);
+            keyboard.add(row3);
+            keyboard.add(row4);
+        }
 
-        keyboard.add(row1);
-        keyboard.add(row2);
-        keyboard.add(row3);
-        keyboard.add(row4);
         keyboardMarkup.setKeyboard(keyboard);
         return keyboardMarkup;
     }

@@ -204,7 +204,8 @@ static void uart_task(void *arg)
 
     uart_driver_install(EX_UART_NUM, BUF_SIZE * 2, 0, 0, NULL, intr_alloc_flags);
     uart_param_config(EX_UART_NUM, &uart_config);
-    uart_set_pin(EX_UART_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_set_pin(EX_UART_NUM, UART_PIN_NO_CHANGE, 
+        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
     uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
     

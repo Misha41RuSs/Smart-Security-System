@@ -30,16 +30,20 @@ public class Subscriber {
     @Column(name = "active")
     private boolean active;
 
+    @Column(name = "is_admin")
+    private boolean isAdmin;
+
     public Subscriber() {
     }
 
-    public Subscriber(Long chatId, String username, String firstName, String lastName, LocalDateTime subscribedAt, boolean active) {
+    public Subscriber(Long chatId, String username, String firstName, String lastName, LocalDateTime subscribedAt, boolean active, boolean isAdmin) {
         this.chatId = chatId;
         this.username = username;
         this.firstName = firstName;
         this.lastName = lastName;
         this.subscribedAt = subscribedAt;
         this.active = active;
+        this.isAdmin = isAdmin;
     }
 
     public Long getChatId() {
@@ -90,6 +94,14 @@ public class Subscriber {
         this.active = active;
     }
 
+    public boolean isAdmin() {
+        return isAdmin;
+    }
+
+    public void setAdmin(boolean admin) {
+        isAdmin = admin;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -101,6 +113,7 @@ public class Subscriber {
         private String lastName;
         private LocalDateTime subscribedAt;
         private boolean active;
+        private boolean isAdmin;
 
         public Builder chatId(Long chatId) {
             this.chatId = chatId;
@@ -132,8 +145,13 @@ public class Subscriber {
             return this;
         }
 
+        public Builder isAdmin(boolean isAdmin) {
+            this.isAdmin = isAdmin;
+            return this;
+        }
+
         public Subscriber build() {
-            return new Subscriber(chatId, username, firstName, lastName, subscribedAt, active);
+            return new Subscriber(chatId, username, firstName, lastName, subscribedAt, active, isAdmin);
         }
     }
 }
