@@ -38,7 +38,5 @@
 
 🌐 **[Открыть Javadoc онлайн](https://Misha41RuSs.github.io/Smart-Security-System/javadoc/index.html)**
 
-*(Примечание: для работы онлайн-ссылки необходимо включить GitHub Pages в настройках репозитория: Settings -> Pages -> Source: ветка `main` (или `master`), папка `/docs`)*
-
 Локально документацию можно открыть по пути: `docs/javadoc/index.html`
 (Если документация отсутствует, ее можно сгенерировать, выполнив `mvn javadoc:javadoc` в папке `backend/`).
