@@ -17,6 +17,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+/**
+ * Service for serial port communication with the hardware sensors.
+ */
 public class SerialService {
 
     private final AppState appState;

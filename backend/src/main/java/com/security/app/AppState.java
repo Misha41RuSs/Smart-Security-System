@@ -12,6 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Component
+/**
+ * Application state manager, holds configuration thresholds and subscriber IDs.
+ */
 public class AppState {
     private final SystemSettingRepository systemSettingRepository;
     private final SubscriberRepository subscriberRepository;

@@ -6,6 +6,9 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "command_logs")
+/**
+ * Entity class representing a log of user commands sent via Telegram.
+ */
 public class CommandLog {
 
     @Id

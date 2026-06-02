@@ -9,6 +9,9 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "subscribers")
+/**
+ * Entity class representing a Telegram user subscribed to the system.
+ */
 public class Subscriber {
 
     @Id

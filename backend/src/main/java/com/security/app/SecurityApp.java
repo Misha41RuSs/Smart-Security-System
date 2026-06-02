@@ -8,6 +8,9 @@ import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 @SpringBootApplication
+/**
+ * Main Spring Boot application class for the Smart Security System.
+ */
 public class SecurityApp {
     public static void main(String[] args) {
         SpringApplication.run(SecurityApp.class, args);

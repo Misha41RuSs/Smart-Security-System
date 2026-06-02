@@ -25,6 +25,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
+/**
+ * Telegram Bot service for handling user commands and sending alerts.
+ */
 public class TelegramBotService extends TelegramLongPollingBot {
 
     private final AppState appState;

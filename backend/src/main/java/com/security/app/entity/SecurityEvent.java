@@ -6,6 +6,9 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "security_events")
+/**
+ * Entity class representing a security alert or event.
+ */
 public class SecurityEvent {
 
     @Id

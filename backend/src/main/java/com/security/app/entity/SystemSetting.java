@@ -7,6 +7,9 @@ import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "system_settings")
+/**
+ * Entity class representing a system setting stored in the database.
+ */
 public class SystemSetting {
 
     @Id
