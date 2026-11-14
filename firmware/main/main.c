@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -11,6 +12,7 @@
 #include "esp_rom_sys.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "security_ble.h"
 
 #define EX_UART_NUM UART_NUM_0
 #define BUF_SIZE (1024)
@@ -20,7 +22,7 @@
 #define ECHO_GPIO 18
 #define LIGHT_SENSOR_CHAN ADC_CHANNEL_6  // GPIO34
 
-// --- I2C: модуль AHT20 (+ BMP280, если он есть на той же плате) ---
+// --- I2C: модуль AHT20 (+ BMP280) ---
 #define I2C_SDA_GPIO GPIO_NUM_21
 #define I2C_SCL_GPIO GPIO_NUM_22
 #define AHT20_ADDR 0x38
@@ -42,12 +44,32 @@
 
 static const char *TAG = "climate";
 
-// Глобальные переменные состояния
-volatile bool is_armed = false;
-volatile bool is_police = false;
-volatile float dist_threshold = 5.0;
-volatile int light_threshold = 800;
-volatile float temp_threshold = 40.0;
+typedef struct {
+    bool armed;
+    bool siren;
+    float dist_threshold;
+    int light_threshold;
+    float temp_threshold;
+} security_settings_t;
+
+static portMUX_TYPE settings_lock = portMUX_INITIALIZER_UNLOCKED;
+static security_settings_t settings = {
+    .dist_threshold = 5.0f,
+    .light_threshold = 800,
+    .temp_threshold = 40.0f,
+};
+
+static void apply_security_command(security_command_t command)
+{
+    taskENTER_CRITICAL(&settings_lock);
+    switch (command) {
+    case SECURITY_DISARM: settings.armed = false; break;
+    case SECURITY_ARM: settings.armed = true; break;
+    case SECURITY_SIREN_OFF: settings.siren = false; break;
+    case SECURITY_SIREN_ON: settings.siren = true; break;
+    }
+    taskEXIT_CRITICAL(&settings_lock);
+}
 
 // Последние показания климатических датчиков (пишет climate_task, читает sensor_task)
 typedef struct {
@@ -329,6 +351,29 @@ static void buzzer_init(void) {
 
 /* ======================= Основной цикл датчиков ======================= */
 
+static bool read_distance(float *distance_cm)
+{
+    if (gpio_get_level(ECHO_GPIO) != 0) return false;
+    gpio_set_level(TRIG_GPIO, 0);
+    esp_rom_delay_us(2);
+    gpio_set_level(TRIG_GPIO, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(TRIG_GPIO, 0);
+
+    int64_t start = esp_timer_get_time();
+    while (gpio_get_level(ECHO_GPIO) == 0) {
+        if (esp_timer_get_time() - start >= 30000) return false;
+    }
+    int64_t echo_start = esp_timer_get_time();
+    while (gpio_get_level(ECHO_GPIO) == 1) {
+        if (esp_timer_get_time() - echo_start >= 30000) return false;
+    }
+    int64_t pulse_us = esp_timer_get_time() - echo_start;
+    if (pulse_us <= 0 || pulse_us >= 30000) return false;
+    *distance_cm = pulse_us * 0.0343f / 2.0f;
+    return true;
+}
+
 static void sensor_task(void *arg)
 {
     // Инициализация датчиков
@@ -349,11 +394,11 @@ static void sensor_task(void *arg)
     buzzer_init();
 
     // Инициализация АЦП
-    adc_oneshot_unit_handle_t adc1_handle;
+    adc_oneshot_unit_handle_t adc1_handle = NULL;
     adc_oneshot_unit_init_cfg_t init_config1 = { .unit_id = ADC_UNIT_1 };
-    adc_oneshot_new_unit(&init_config1, &adc1_handle);
     adc_oneshot_chan_cfg_t config = { .bitwidth = ADC_BITWIDTH_DEFAULT, .atten = ADC_ATTEN_DB_12 };
-    adc_oneshot_config_channel(adc1_handle, LIGHT_SENSOR_CHAN, &config);
+    bool adc_ready = adc_oneshot_new_unit(&init_config1, &adc1_handle) == ESP_OK &&
+                     adc_oneshot_config_channel(adc1_handle, LIGHT_SENSOR_CHAN, &config) == ESP_OK;
 
     // Переменная для хранения предыдущего состояния кнопки
     int last_btn_state = 1;
@@ -367,42 +412,39 @@ static void sensor_task(void *arg)
 
         // Ловим момент нажатия (было 1, стало 0)
         if (last_btn_state == 1 && current_btn_state == 0) {
-            is_armed = !is_armed; // Переключаем режим!
-
-            // Зажигаем или тушим синий светодиод на плате
-            gpio_set_level(BUILTIN_LED_GPIO, is_armed ? 1 : 0);
-
-            printf("\n==== РЕЖИМ ОХРАНЫ: %s ====\n\n", is_armed ? "ВКЛЮЧЕН (Синий диод горит)" : "ОТКЛЮЧЕН");
+            taskENTER_CRITICAL(&settings_lock);
+            settings.armed = !settings.armed;
+            bool armed = settings.armed;
+            taskEXIT_CRITICAL(&settings_lock);
+            printf("\n==== РЕЖИМ ОХРАНЫ: %s ====\n\n", armed ? "ВКЛЮЧЕН (Синий диод горит)" : "ОТКЛЮЧЕН");
         }
         last_btn_state = current_btn_state;
 
         // --- 1. Сонар ---
-        gpio_set_level(TRIG_GPIO, 0);
-        esp_rom_delay_us(2);
-        gpio_set_level(TRIG_GPIO, 1);
-        esp_rom_delay_us(10);
-        gpio_set_level(TRIG_GPIO, 0);
-
-        int64_t start_time = esp_timer_get_time();
-        while (gpio_get_level(ECHO_GPIO) == 0 && (esp_timer_get_time() - start_time < 30000));
-        int64_t echo_start = esp_timer_get_time();
-        while (gpio_get_level(ECHO_GPIO) == 1 && (esp_timer_get_time() - echo_start < 30000));
-        int64_t echo_end = esp_timer_get_time();
-        float distance = (echo_end - echo_start) * 0.0343 / 2.0;
+        float distance = 0.0f;
+        bool distance_valid = read_distance(&distance);
 
         // --- 2. Свет ---
         int raw_light = 0;
-        adc_oneshot_read(adc1_handle, LIGHT_SENSOR_CHAN, &raw_light);
+        bool light_valid = adc_ready &&
+                           adc_oneshot_read(adc1_handle, LIGHT_SENSOR_CHAN, &raw_light) == ESP_OK;
 
         // --- 3. Климат (последнее значение из climate_task) ---
         climate_data_t c;
         taskENTER_CRITICAL(&climate_lock);
         c = climate;
         taskEXIT_CRITICAL(&climate_lock);
-        bool overheat = c.temp_valid && c.temp_c > temp_threshold;
+        taskENTER_CRITICAL(&settings_lock);
+        security_settings_t current = settings;
+        taskEXIT_CRITICAL(&settings_lock);
+        bool too_close = current.armed && distance_valid && distance > 0.1f &&
+                         distance < current.dist_threshold;
+        bool bright = current.armed && light_valid && raw_light > current.light_threshold;
+        bool overheat = current.armed && c.temp_valid && c.temp_c > current.temp_threshold;
 
         // --- 4. ЛОГИКА (Зависит от режима) ---
-        if (is_police) {
+        gpio_set_level(BUILTIN_LED_GPIO, current.armed);
+        if (current.siren) {
             static int police_tick = 0;
             police_tick++;
             if (police_tick >= 6) police_tick = 0;
@@ -420,26 +462,16 @@ static void sensor_task(void *arg)
                 ledc_set_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_0, 500);
                 ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
             }
-        } else if (is_armed) {
+        } else if (current.armed) {
             // Восстанавливаем частоту зуммера на случай если была сирена
             ledc_set_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_0, LEDC_FREQUENCY);
 
             // Охрана ВКЛ: Лампочки и зуммер реагируют на датчики
             gpio_set_level(LED_GREEN_GPIO, overheat ? 1 : 0);
 
-            if (distance < dist_threshold && distance > 0.1) {
-                gpio_set_level(LED_RED_GPIO, 1);
-            } else {
-                gpio_set_level(LED_RED_GPIO, 0);
-            }
-
-            if (raw_light > light_threshold) {
-                ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, LEDC_DUTY_QUIET);
-                ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-            } else {
-                ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
-                ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-            }
+            gpio_set_level(LED_RED_GPIO, too_close);
+            ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, bright ? LEDC_DUTY_QUIET : 0);
+            ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
         } else {
             // Охрана ВЫКЛ: Принудительно тушим внешние диоды и зуммер
             gpio_set_level(LED_GREEN_GPIO, 0);
@@ -447,6 +479,21 @@ static void sensor_task(void *arg)
             ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
             ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
         }
+
+        const security_telemetry_t telemetry = {
+            .flags = (current.armed ? SECURITY_ARMED : 0) |
+                     (current.siren ? SECURITY_SIREN : 0) |
+                     (too_close ? SECURITY_TOO_CLOSE : 0) |
+                     (bright ? SECURITY_BRIGHT : 0) |
+                     (overheat ? SECURITY_OVERHEAT : 0),
+            .distance_tenths_cm = distance_valid ? lroundf(distance * 10.0f) : UINT16_MAX,
+            .light_adc = light_valid ? raw_light : UINT16_MAX,
+            .temperature_tenths_c = c.temp_valid ? lroundf(c.temp_c * 10.0f) : INT16_MIN,
+            .humidity_tenths_pct = c.hum_valid ? lroundf(c.hum_pct * 10.0f) : UINT16_MAX,
+            .pressure_tenths_hpa = c.press_valid && c.press_hpa >= 0.0f && c.press_hpa < 6553.4f
+                ? lroundf(c.press_hpa * 10.0f) : UINT16_MAX,
+        };
+        security_ble_publish(&telemetry);
 
         // Вывод статуса системы раз в 100мс.
         // Формат разбирает backend (SerialService): если нет данных — пишем "--".
@@ -456,7 +503,7 @@ static void sensor_task(void *arg)
         if (c.press_valid) snprintf(press_s, sizeof(press_s), "%.1f", c.press_hpa);
 
         printf("[%s] Дист: %4.1f см | Свет: %4d | Темп: %s C | Влаж: %s %% | Давл: %s гПа\n",
-               is_armed ? "ОХРАНА" : " ЖДУЩ ", distance, raw_light, temp_s, hum_s, press_s);
+               current.armed ? "ОХРАНА" : " ЖДУЩ ", distance, raw_light, temp_s, hum_s, press_s);
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -490,27 +537,34 @@ static void uart_task(void *arg)
             data[len] = '\0';
             // Парсим команды ARM / DISARM / DIST / LIGHT / TEMP / POLICE / NOPOLICE
             if (strncmp((char *)data, "DISARM", 6) == 0) {
-                is_armed = false;
-                gpio_set_level(BUILTIN_LED_GPIO, 0);
+                apply_security_command(SECURITY_DISARM);
                 printf("\n==== РЕЖИМ ОХРАНЫ: ОТКЛЮЧЕН (ПО КОМАНДЕ ИЗ TELEGRAM) ====\n\n");
             } else if (strncmp((char *)data, "ARM", 3) == 0) {
-                is_armed = true;
-                gpio_set_level(BUILTIN_LED_GPIO, 1);
+                apply_security_command(SECURITY_ARM);
                 printf("\n==== РЕЖИМ ОХРАНЫ: ВКЛЮЧЕН (ПО КОМАНДЕ ИЗ TELEGRAM) ====\n\n");
             } else if (strncmp((char *)data, "DIST:", 5) == 0) {
-                dist_threshold = atof((char *)data + 5);
-                printf("\n==== НОВЫЙ ПОРОГ ДИСТАНЦИИ: %.1f ====\n\n", dist_threshold);
+                float threshold = atof((char *)data + 5);
+                taskENTER_CRITICAL(&settings_lock);
+                settings.dist_threshold = threshold;
+                taskEXIT_CRITICAL(&settings_lock);
+                printf("\n==== НОВЫЙ ПОРОГ ДИСТАНЦИИ: %.1f ====\n\n", threshold);
             } else if (strncmp((char *)data, "LIGHT:", 6) == 0) {
-                light_threshold = atoi((char *)data + 6);
-                printf("\n==== НОВЫЙ ПОРОГ СВЕТА: %d ====\n\n", light_threshold);
+                int threshold = atoi((char *)data + 6);
+                taskENTER_CRITICAL(&settings_lock);
+                settings.light_threshold = threshold;
+                taskEXIT_CRITICAL(&settings_lock);
+                printf("\n==== НОВЫЙ ПОРОГ СВЕТА: %d ====\n\n", threshold);
             } else if (strncmp((char *)data, "TEMP:", 5) == 0) {
-                temp_threshold = atof((char *)data + 5);
-                printf("\n==== НОВЫЙ ПОРОГ ТЕМПЕРАТУРЫ: %.1f ====\n\n", temp_threshold);
+                float threshold = atof((char *)data + 5);
+                taskENTER_CRITICAL(&settings_lock);
+                settings.temp_threshold = threshold;
+                taskEXIT_CRITICAL(&settings_lock);
+                printf("\n==== НОВЫЙ ПОРОГ ТЕМПЕРАТУРЫ: %.1f ====\n\n", threshold);
             } else if (strncmp((char *)data, "NOPOLICE", 8) == 0) {
-                is_police = false;
+                apply_security_command(SECURITY_SIREN_OFF);
                 printf("\n==== РЕЖИМ СИРЕНЫ: ОТКЛЮЧЕН ====\n\n");
             } else if (strncmp((char *)data, "POLICE", 6) == 0) {
-                is_police = true;
+                apply_security_command(SECURITY_SIREN_ON);
                 printf("\n==== РЕЖИМ СИРЕНЫ: ВКЛЮЧЕН ====\n\n");
             }
         }
@@ -523,4 +577,8 @@ void app_main(void)
     xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 5, NULL);
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
     xTaskCreate(climate_task, "climate_task", 4096, NULL, 4, NULL);
+    esp_err_t err = security_ble_start(apply_security_command);
+    if (err != ESP_OK) {
+        ESP_LOGE("security_ble", "BLE unavailable: %s", esp_err_to_name(err));
+    }
 }
