@@ -1,53 +1,45 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-H21 | ESP32-H4 | ESP32-P4 | ESP32-S2 | ESP32-S3 | Linux |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | --------- | -------- | -------- | -------- | -------- | ----- |
+# Прошивки ESP32
 
-# Hello World Example
+ESP-IDF 5.5.6, классический ESP32, flash не менее 2 МБ. AHT20+BMP280 на обеих платах подключается к GPIO21 (SDA), GPIO22 (SCL), 3V3 и GND. Каждая плата использует собственную шину I²C.
 
-Starts a FreeRTOS task to print "Hello World".
+## Сборка и прошивка в Windows
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+В PowerShell ESP-IDF открой этот каталог. COM3 и COM4 ниже — примеры; выбери порт нужной платы и закрой использующий его Serial Monitor.
 
-## How to use example
+Охранный узел ESP32-SS:
 
-Follow detailed instructions provided specifically for this example.
-
-Select the instructions depending on Espressif chip installed on your development board:
-
-- [ESP32 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/stable/get-started/index.html)
-- [ESP32-S2 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/get-started/index.html)
-
-
-## Example folder contents
-
-The project **hello_world** contains one source file in C language [hello_world_main.c](main/hello_world_main.c). The file is located in folder [main](main).
-
-ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt` files that provide set of directives and instructions describing the project's source files and targets (executable, library, or both).
-
-Below is short explanation of remaining files in the project folder.
-
-```
-├── CMakeLists.txt
-├── pytest_hello_world.py      Python script used for automated testing
-├── main
-│   ├── CMakeLists.txt
-│   └── hello_world_main.c
-└── README.md                  This is the file you are currently reading
+```powershell
+idf.py -B build/cloud-security -D SECURITY_CLIMATE_NODE=OFF -D "SDKCONFIG=$PWD/build/cloud-security/sdkconfig" -p COM3 flash monitor
 ```
 
-For more information on structure and contents of ESP-IDF projects, please refer to Section [Build System](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/build-system.html) of the ESP-IDF Programming Guide.
+Климатический узел ESP32-CL:
 
-## Troubleshooting
+```powershell
+idf.py -B build/cloud-climate -D SECURITY_CLIMATE_NODE=ON -D "SDKCONFIG=$PWD/build/cloud-climate/sdkconfig" -p COM4 flash monitor
+```
 
-* Program upload failure
+Используй новые каталоги сборки: старый sdkconfig из build/ble или build/climate не применит новые настройки разделов и памяти. Команда flash записывает приложение, bootloader и таблицу разделов. Записи только одного .bin недостаточно. Существующий раздел nvs с BLE-сопряжениями сохранён по адресу 0x9000; отдельный cloud NVS расположен по адресу 0x1c0000. OTA-разделов нет.
 
-    * Hardware connection is not correct: run `idf.py -p PORT monitor`, and reboot your board to see if there are any output logs.
-    * The baud rate for downloading is too high: lower your baud rate in the `menuconfig` menu, and try again.
+При самостоятельном переносе конфигурации включи custom partitions.csv, certificate bundle и coexistence, отключи Wi-Fi IRAM optimizations и перенеси ограничения Wi-Fi-буферов из sdkconfig.defaults.
 
-## Technical support and feedback
+## Работа
 
-Please use the following feedback channels:
+При запуске без настройки работает BLE. В приложении выбери плату, введи PIN из Serial Monitor и открой настройку Wi-Fi. Настройки сохраняются в NVS; после перезапуска плата подключается автоматически. Поддерживаются сети 2,4 ГГц WPA2/WPA3 transition и открытые сети; enterprise и captive portal не реализованы.
 
-* For technical queries, go to the [esp32.com](https://esp32.com/) forum
-* For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
+Неблокирующая относительно сетевых запросов задача датчиков продолжает локальную охрану. Запись новой тревоги в NVS синхронная и кратковременно задерживает задачу датчиков. Облачная задача отдельно выполняет HTTPS-запросы, отступая до 30 секунд при ошибках; BLE остаётся доступным. Пароль и ключ устройства не печатаются в лог.
 
-We will get back to you as soon as possible.
+Тревоги сохраняются при переходе условия из неактивного в активное. Очередь ограничена 64 событиями. При заполнении новые события отбрасываются, счётчик потерь сохраняется и виден в приложении. Событие удаляется после подтверждения облаком; потеря ответа приводит к повторной отправке с тем же ID. Обрыв питания до завершения записи flash всё ещё может потерять последнее событие. Ошибка NVS отображается в BLE-статусе.
+
+Время синхронизируется по SNTP. До синхронизации событие хранит uptime и уникальный ID, но не выдуманную календарную дату; сервер отдельно сохраняет время получения. DS3231 ещё не используется.
+
+Обычная телеметрия хранится только как последний снимок в RAM и передаётся при активной облачной подписке. Климатическая плата не выполняет команды охраны и не генерирует охранные тревоги. Абсолютные команды (включить/выключить) допускают повтор при потере подтверждения; срок доставки — 30 секунд. Они подтверждают принятие программной настройки, а не физическое состояние исполнительного устройства.
+
+## BLE provisioning
+
+Существующие service UUID c001, command c002 и telemetry c003 сохранены. Добавлены d91fc004-cc92-4e99-9c67-2f7396311bce (запись настройки) и d91fc005-cc92-4e99-9c67-2f7396311bce (чтение статуса), только с аутентифицированным шифрованием и 16-байтовым ключом.
+
+Формат c004: `[1,0]` начинает новую транзакцию; `[1,1,offsetLo,offsetHi,...до 16 байт]` дописывает UTF-8 JSON; `[1,2]` валидирует и сохраняет целиком. Смещения обязаны идти последовательно, предел JSON — 1023 байта. Разрыв BLE отменяет несохранённую транзакцию. Wi-Fi применяется асинхронно после подтверждения записи.
+
+JSON содержит ssid/password; url/id/token передаются либо все вместе, либо не передаются (сохраняется предыдущая облачная привязка). URL обязан быть HTTPS. Секреты не доступны для чтения по BLE, но NVS физически не зашифрована: защита от чтения flash потребует отдельной настройки Secure Boot/Flash Encryption.
+
+c005: 4 байта: версия 1; флаги configured/Wi-Fi IP/cloud reachable/NVS error (биты 0–3); длина очереди; счётчик потерь с насыщением на 255. При ошибке запуска облачного модуля BLE и локальная охрана продолжают работать; флаг ошибки также сигнализирует об этом. Биты соединения показывают последний известный результат, а не гарантию доступности в текущую миллисекунду.

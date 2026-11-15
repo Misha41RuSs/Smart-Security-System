@@ -1,5 +1,6 @@
 #include <math.h>
 #include "climate.h"
+#include "cloud.h"
 #include "security_ble.h"
 #include "esp_log.h"
 
@@ -25,6 +26,10 @@ static void publish_climate(const climate_data_t *sample)
 
 void app_main(void)
 {
+    esp_err_t cloud_err = cloud_start(NULL);
+    if (cloud_err != ESP_OK) {
+        ESP_LOGE("cloud", "Cloud disabled, BLE remains available: %s", esp_err_to_name(cloud_err));
+    }
     ESP_LOGI("climate_node", "ESP32-CL, AHT20+BMP280 on SDA=21 SCL=22");
     ESP_ERROR_CHECK(climate_start(publish_climate));
     esp_err_t err = security_ble_start(NULL);

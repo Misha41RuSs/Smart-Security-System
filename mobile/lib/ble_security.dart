@@ -7,6 +7,7 @@ import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
 import 'phone_notifications.dart';
 import 'security_protocol.dart';
+import 'provisioning.dart';
 
 typedef AlertEntry = ({SecurityAlert alert, DateTime time});
 
@@ -286,6 +287,48 @@ class BleSecurity extends ChangeNotifier {
     } catch (_) {
       if (_isCurrent(session)) {
         _message = 'ESP32 не подтвердила команду. Проверь связь.';
+      }
+    } finally {
+      if (_isCurrent(session)) {
+        _writing = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<NetworkStatus> networkStatus() async {
+    if (!_ready || _device == null) throw StateError('Нет BLE-соединения');
+    final bytes = await _ble
+        .readCharacteristic(
+          QualifiedCharacteristic(
+            deviceId: _device!.id,
+            serviceId: _serviceId,
+            characteristicId: Uuid.parse(networkUuid),
+          ),
+        )
+        .timeout(const Duration(seconds: 8));
+    return NetworkStatus(bytes);
+  }
+
+  Future<void> configureNetwork(Map<String, String> config) async {
+    if (!_ready || _device == null || _writing) {
+      throw StateError('Нет свободного BLE-соединения');
+    }
+    final frames = provisioningFrames(config);
+    final session = _session;
+    final characteristic = QualifiedCharacteristic(
+      deviceId: _device!.id,
+      serviceId: _serviceId,
+      characteristicId: Uuid.parse(configUuid),
+    );
+    _writing = true;
+    notifyListeners();
+    try {
+      for (final frame in frames) {
+        if (!_isCurrent(session)) throw StateError('BLE-соединение прервано');
+        await _ble
+            .writeCharacteristicWithResponse(characteristic, value: frame)
+            .timeout(const Duration(seconds: 8));
       }
     } finally {
       if (_isCurrent(session)) {

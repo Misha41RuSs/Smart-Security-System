@@ -11,6 +11,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "security_ble.h"
+#include "cloud.h"
 
 #ifdef SECURITY_CLIMATE_NODE
 #define DEVICE_NAME "ESP32-CL"
@@ -27,6 +28,11 @@
 static const ble_uuid128_t service_uuid = SECURITY_UUID(0x01);
 static const ble_uuid128_t command_uuid = SECURITY_UUID(0x02);
 static const ble_uuid128_t state_uuid = SECURITY_UUID(0x03);
+static const ble_uuid128_t config_uuid = SECURITY_UUID(0x04);
+static const ble_uuid128_t network_uuid = SECURITY_UUID(0x05);
+static char config_buffer[1024];
+static size_t config_length;
+static bool config_started;
 static const char *TAG = "security_ble";
 
 static void (*on_command)(security_command_t);
@@ -50,6 +56,7 @@ static security_telemetry_t telemetry = {
 };
 static const uint8_t alert_flags[] = { SECURITY_TOO_CLOSE, SECURITY_BRIGHT, SECURITY_OVERHEAT };
 static uint16_t alert_counts[sizeof(alert_flags)];
+static void encode_state(uint8_t packet[STATE_SIZE]);
 
 void security_ble_publish(const security_telemetry_t *reading)
 {
@@ -62,6 +69,9 @@ void security_ble_publish(const security_telemetry_t *reading)
     }
     telemetry = *reading;
     taskEXIT_CRITICAL(&state_lock);
+    uint8_t packet[STATE_SIZE];
+    encode_state(packet);
+    cloud_publish(packet, rising);
 }
 
 static void encode_state(uint8_t packet[STATE_SIZE])
@@ -106,6 +116,39 @@ static int write_command(uint16_t conn, uint16_t attr, struct ble_gatt_access_ct
     return 0;
 }
 
+static int provision(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    uint8_t frame[20];
+    uint16_t length=OS_MBUF_PKTLEN(ctxt->om);
+    if (length<2 || length>20 || ble_hs_mbuf_to_flat(ctxt->om,frame,sizeof(frame),NULL)!=0 || frame[0]!=1)
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (frame[1]==0 && length==2) {
+        memset(config_buffer,0,sizeof(config_buffer));
+        config_length=0; config_started=true; return 0;
+    }
+    if (!config_started) return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+    if (frame[1]==1 && length>4) {
+        size_t offset=frame[2]|((size_t)frame[3]<<8);
+        if(offset!=config_length || config_length+length-4>=sizeof(config_buffer))
+            return BLE_ATT_ERR_INVALID_OFFSET;
+        memcpy(config_buffer+config_length,frame+4,length-4);
+        config_length+=length-4; return 0;
+    }
+    if (frame[1]==2 && length==2) {
+        config_buffer[config_length]=0;
+        esp_err_t err=cloud_configure(config_buffer);
+        memset(config_buffer,0,sizeof(config_buffer)); config_started=false; config_length=0;
+        return err==ESP_OK ? 0 : BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+    }
+    return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+}
+
+static int read_network(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    uint8_t status[4]; cloud_status(status);
+    return os_mbuf_append(ctxt->om,status,sizeof(status))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
 static const struct ble_gatt_svc_def services[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -122,6 +165,18 @@ static const struct ble_gatt_svc_def services[] = {
                 .access_cb = read_state,
                 .val_handle = &state_handle,
                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN | BLE_GATT_CHR_F_NOTIFY,
+                .min_key_size = 16,
+            },
+            {
+                .uuid = &config_uuid.u,
+                .access_cb = provision,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
+                .min_key_size = 16,
+            },
+            {
+                .uuid = &network_uuid.u,
+                .access_cb = read_network,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN,
                 .min_key_size = 16,
             },
             {0},
@@ -191,6 +246,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
+        memset(config_buffer,0,sizeof(config_buffer)); config_length=0; config_started=false;
         subscriber = BLE_HS_CONN_HANDLE_NONE;
         ble_npl_callout_stop(&notify_timer);
         advertise();

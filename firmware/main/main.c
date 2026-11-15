@@ -8,6 +8,7 @@
 #include "driver/ledc.h"
 #include "driver/uart.h"
 #include "climate.h"
+#include "cloud.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
 #include "esp_adc/adc_oneshot.h"
@@ -240,7 +241,7 @@ static void sensor_task(void *arg)
         security_ble_publish(&telemetry);
 
         // Вывод статуса системы раз в 100мс.
-        // Формат разбирает backend (SerialService): если нет данных — пишем "--".
+        // Диагностика в Serial Monitor: если нет данных — пишем "--".
         char temp_s[12] = "--", hum_s[12] = "--", press_s[12] = "--";
         if (c.temp_valid)  snprintf(temp_s, sizeof(temp_s), "%.1f", c.temp_c);
         if (c.hum_valid)   snprintf(hum_s, sizeof(hum_s), "%.1f", c.hum_pct);
@@ -318,6 +319,10 @@ static void uart_task(void *arg)
 
 void app_main(void)
 {
+    esp_err_t cloud_err = cloud_start(apply_security_command);
+    if (cloud_err != ESP_OK) {
+        ESP_LOGE("cloud", "Cloud disabled, local control remains available: %s", esp_err_to_name(cloud_err));
+    }
     xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 5, NULL);
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
     ESP_ERROR_CHECK(climate_start(update_climate));

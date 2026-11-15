@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:cloud;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+security:
+  registration-enabled: true
+  session-hours: 24
+  viewer-lease-ms: 15000
+  command-ttl-ms: 30000

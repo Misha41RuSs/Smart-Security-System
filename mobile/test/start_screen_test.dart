@@ -10,4 +10,16 @@ void main() {
     expect(find.text('Пока нет событий'), findsOneWidget);
     expect(find.text('Сирена'), findsNothing);
   });
+
+  testWidgets('cloud account screen is separate from local Bluetooth', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SecurityApp());
+    await tester.tap(find.byTooltip('Облако'));
+    await tester.pumpAndSettle();
+    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('Войти'), findsOneWidget);
+    expect(find.text('Адрес облака'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'ble_security.dart';
 import 'security_protocol.dart';
+import 'cloud_page.dart';
+import 'wifi_page.dart';
 
 void main() => runApp(const SecurityApp());
 
@@ -41,7 +43,18 @@ class _SecurityPageState extends State<SecurityPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Охрана ESP32')),
+      appBar: AppBar(
+        title: const Text('Охрана ESP32'),
+        actions: [
+          IconButton(
+            tooltip: 'Облако',
+            icon: const Icon(Icons.cloud_outlined),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: (_) => const CloudPage())),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -55,6 +68,16 @@ class _SecurityPageState extends State<SecurityPage> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   children: [
                     _connectionCard(context),
+                    if (_security.ready)
+                      TextButton.icon(
+                        icon: const Icon(Icons.wifi),
+                        label: const Text('Настроить Wi-Fi'),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => WifiPage(ble: _security),
+                          ),
+                        ),
+                      ),
                     if (message != null)
                       Padding(
                         padding: const EdgeInsets.all(12),
