@@ -39,6 +39,7 @@ class SecurityState {
   final ByteData _data;
 
   int get _flags => _data.getUint8(1);
+  bool get climateOnly => _flags & (1 << 5) != 0;
   bool get armed => _flags & (1 << 0) != 0;
   bool get siren => _flags & (1 << 1) != 0;
   bool isActive(SecurityAlert alert) => _flags & alert.flag != 0;

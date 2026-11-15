@@ -67,7 +67,7 @@ class _SecurityPageState extends State<SecurityPage> {
                       ),
                     if (state != null) ...[
                       const SizedBox(height: 16),
-                      _controls(state),
+                      if (!state.climateOnly) _controls(state),
                       const SizedBox(height: 24),
                       Text(
                         'Датчики',
@@ -77,7 +77,7 @@ class _SecurityPageState extends State<SecurityPage> {
                       _measurements(state),
                     ],
                     const SizedBox(height: 24),
-                    _eventList(context),
+                    if (state?.climateOnly != true) _eventList(context),
                   ],
                 );
               },
@@ -94,7 +94,9 @@ class _SecurityPageState extends State<SecurityPage> {
     final String description;
     if (_security.ready) {
       title = device!.name.isEmpty ? 'ESP32' : device.name;
-      description = 'Подключено по Bluetooth';
+      description = _security.state?.climateOnly == true
+          ? 'Климатический узел · Подключено по Bluetooth'
+          : 'Охранный узел · Подключено по Bluetooth';
     } else if (device != null) {
       title = 'Подключение к ESP32';
       description = 'При первом подключении введи PIN из Serial Monitor.';
@@ -176,18 +178,20 @@ class _SecurityPageState extends State<SecurityPage> {
 
   Widget _measurements(SecurityState state) {
     final metrics = [
-      (
-        label: 'Расстояние',
-        value: _reading(state.distance, 'см'),
-        icon: Icons.straighten,
-        alert: state.isActive(SecurityAlert.distance),
-      ),
-      (
-        label: 'Освещённость',
-        value: state.light == null ? '—' : '${state.light} АЦП',
-        icon: Icons.light_mode_outlined,
-        alert: state.isActive(SecurityAlert.light),
-      ),
+      if (!state.climateOnly)
+        (
+          label: 'Расстояние',
+          value: _reading(state.distance, 'см'),
+          icon: Icons.straighten,
+          alert: state.isActive(SecurityAlert.distance),
+        ),
+      if (!state.climateOnly)
+        (
+          label: 'Освещённость',
+          value: state.light == null ? '—' : '${state.light} АЦП',
+          icon: Icons.light_mode_outlined,
+          alert: state.isActive(SecurityAlert.light),
+        ),
       (
         label: 'Температура',
         value: _reading(state.temperature, '°C'),

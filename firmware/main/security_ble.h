@@ -16,6 +16,7 @@ enum {
     SECURITY_TOO_CLOSE = 1 << 2,
     SECURITY_BRIGHT = 1 << 3,
     SECURITY_OVERHEAT = 1 << 4,
+    SECURITY_CLIMATE_ONLY = 1 << 5,
 };
 
 typedef struct {

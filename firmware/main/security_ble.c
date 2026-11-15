@@ -12,7 +12,11 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "security_ble.h"
 
+#ifdef SECURITY_CLIMATE_NODE
+#define DEVICE_NAME "ESP32-CL"
+#else
 #define DEVICE_NAME "ESP32-SS"
+#endif
 #define PROTOCOL_VERSION 1
 #define STATE_SIZE 18
 #define NOTIFY_INTERVAL_MS 100
@@ -35,6 +39,9 @@ static bool sent_notification;
 
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static security_telemetry_t telemetry = {
+#ifdef SECURITY_CLIMATE_NODE
+    .flags = SECURITY_CLIMATE_ONLY,
+#endif
     .distance_tenths_cm = UINT16_MAX,
     .light_adc = UINT16_MAX,
     .temperature_tenths_c = INT16_MIN,
@@ -83,6 +90,9 @@ static int read_state(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
 
 static int write_command(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
+    if (on_command == NULL) {
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    }
     uint8_t command[2];
     if (OS_MBUF_PKTLEN(ctxt->om) != sizeof(command) ||
         ble_hs_mbuf_to_flat(ctxt->om, command, sizeof(command), NULL) != 0) {

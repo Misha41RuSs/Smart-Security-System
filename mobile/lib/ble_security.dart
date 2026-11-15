@@ -123,6 +123,7 @@ class BleSecurity extends ChangeNotifier {
     if (_device != null) return;
     final session = ++_session;
     _device = device;
+    _events.clear();
     _message = null;
     notifyListeners();
     await _stopScan();
@@ -264,7 +265,9 @@ class BleSecurity extends ChangeNotifier {
 
   Future<void> send(SecurityCommand command) async {
     final device = _device;
-    if (!_ready || _writing || device == null) return;
+    if (!_ready || _writing || device == null || _state?.climateOnly == true) {
+      return;
+    }
     final session = _session;
     _writing = true;
     _message = null;
