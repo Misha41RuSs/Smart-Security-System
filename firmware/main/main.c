@@ -10,7 +10,7 @@
 #include "climate.h"
 #include "cloud.h"
 #include "esp_timer.h"
-#include "esp_rom_sys.h"
+#include "sonar.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "security_ble.h"
@@ -96,34 +96,13 @@ static void buzzer_init(void) {
 
 /* ======================= Основной цикл датчиков ======================= */
 
-static bool read_distance(float *distance_cm)
-{
-    if (gpio_get_level(ECHO_GPIO) != 0) return false;
-    gpio_set_level(TRIG_GPIO, 0);
-    esp_rom_delay_us(2);
-    gpio_set_level(TRIG_GPIO, 1);
-    esp_rom_delay_us(10);
-    gpio_set_level(TRIG_GPIO, 0);
-
-    int64_t start = esp_timer_get_time();
-    while (gpio_get_level(ECHO_GPIO) == 0) {
-        if (esp_timer_get_time() - start >= 30000) return false;
-    }
-    int64_t echo_start = esp_timer_get_time();
-    while (gpio_get_level(ECHO_GPIO) == 1) {
-        if (esp_timer_get_time() - echo_start >= 30000) return false;
-    }
-    int64_t pulse_us = esp_timer_get_time() - echo_start;
-    if (pulse_us <= 0 || pulse_us >= 30000) return false;
-    *distance_cm = pulse_us * 0.0343f / 2.0f;
-    return true;
-}
-
 static void sensor_task(void *arg)
 {
     // Инициализация датчиков
-    gpio_set_direction(TRIG_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_direction(ECHO_GPIO, GPIO_MODE_INPUT);
+    esp_err_t sonar_err = sonar_init(TRIG_GPIO, ECHO_GPIO);
+    if (sonar_err != ESP_OK) {
+        ESP_LOGE("sonar", "RMT init failed: %s", esp_err_to_name(sonar_err));
+    }
 
     // Инициализация светодиодов
     gpio_set_direction(LED_GREEN_GPIO, GPIO_MODE_OUTPUT);
@@ -167,7 +146,7 @@ static void sensor_task(void *arg)
 
         // --- 1. Сонар ---
         float distance = 0.0f;
-        bool distance_valid = read_distance(&distance);
+        bool distance_valid = sonar_read(&distance);
 
         // --- 2. Свет ---
         int raw_light = 0;
@@ -240,15 +219,16 @@ static void sensor_task(void *arg)
         };
         security_ble_publish(&telemetry);
 
-        // Вывод статуса системы раз в 100мс.
+        // Вывод статуса после каждого цикла измерения.
         // Диагностика в Serial Monitor: если нет данных — пишем "--".
-        char temp_s[12] = "--", hum_s[12] = "--", press_s[12] = "--";
+        char dist_s[12] = "--", temp_s[12] = "--", hum_s[12] = "--", press_s[12] = "--";
+        if (distance_valid) snprintf(dist_s, sizeof(dist_s), "%.1f", distance);
         if (c.temp_valid)  snprintf(temp_s, sizeof(temp_s), "%.1f", c.temp_c);
         if (c.hum_valid)   snprintf(hum_s, sizeof(hum_s), "%.1f", c.hum_pct);
         if (c.press_valid) snprintf(press_s, sizeof(press_s), "%.1f", c.press_hpa);
 
-        printf("[%s] Дист: %4.1f см | Свет: %4d | Темп: %s C | Влаж: %s %% | Давл: %s гПа\n",
-               current.armed ? "ОХРАНА" : " ЖДУЩ ", distance, raw_light, temp_s, hum_s, press_s);
+        printf("[%s] Дист: %s см | Свет: %4d | Темп: %s C | Влаж: %s %% | Давл: %s гПа\n",
+               current.armed ? "ОХРАНА" : " ЖДУЩ ", dist_s, raw_light, temp_s, hum_s, press_s);
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
