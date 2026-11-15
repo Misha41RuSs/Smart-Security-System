@@ -298,6 +298,7 @@ class BleSecurity extends ChangeNotifier {
 
   Future<NetworkStatus> networkStatus() async {
     if (!_ready || _device == null) throw StateError('Нет BLE-соединения');
+    final session = _session;
     final bytes = await _ble
         .readCharacteristic(
           QualifiedCharacteristic(
@@ -307,6 +308,7 @@ class BleSecurity extends ChangeNotifier {
           ),
         )
         .timeout(const Duration(seconds: 8));
+    if (!_isCurrent(session)) throw StateError('BLE-соединение изменилось');
     return NetworkStatus(bytes);
   }
 

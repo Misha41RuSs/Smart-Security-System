@@ -21,6 +21,8 @@
 #define PROTOCOL_VERSION 1
 #define STATE_SIZE 18
 #define NOTIFY_INTERVAL_MS 100
+// Increment whenever GATT services/characteristics or their handles change.
+#define GATT_SCHEMA_VERSION 2
 
 // UUID: d91fc001/2/3-cc92-4e99-9c67-2f7396311bce. NimBLE expects little endian.
 #define SECURITY_UUID(id) BLE_UUID128_INIT(0xce, 0x1b, 0x31, 0x96, 0x73, 0x2f, 0x67, 0x9c, \
@@ -276,6 +278,16 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             }
         }
         break;
+    case BLE_GAP_EVENT_REPEAT_PAIRING: {
+        // The phone may have forgotten its key. Replace only this peer's bond;
+        // the new pairing still requires the displayed PIN and authenticated SC.
+        struct ble_gap_conn_desc peer;
+        if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &peer) != 0 ||
+            ble_store_util_delete_peer(&peer.peer_id_addr) != 0) {
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        }
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
+    }
     case BLE_GAP_EVENT_ENC_CHANGE:
         if (event->enc_change.status != 0) {
             ESP_LOGW(TAG, "BLE pairing/encryption failed: %d", event->enc_change.status);
@@ -298,6 +310,13 @@ static void host_sync(void)
 {
     int rc = ble_hs_id_infer_auto(0, &own_addr_type);
     if (rc == 0) {
+        // Refresh bonded clients after boot, including phones paired with an
+        // older firmware. NimBLE queues the indication for disconnected peers.
+        // Repeat on every boot: the pending flag survives in NVS, but NimBLE's
+        // Service Changed handle range is RAM-only and must be set again.
+        ble_svc_gatt_changed(1, UINT16_MAX);
+        ESP_LOGI(TAG, "%s GATT schema %u ready, Wi-Fi config/status: c004/c005",
+                 DEVICE_NAME, GATT_SCHEMA_VERSION);
         advertise();
     } else {
         ESP_LOGE(TAG, "BLE address unavailable: %d", rc);

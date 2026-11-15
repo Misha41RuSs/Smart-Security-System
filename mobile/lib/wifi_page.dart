@@ -20,6 +20,7 @@ class _WifiPageState extends State<WifiPage> {
   final name = TextEditingController();
   bool busy = false, linkCloud = false;
   String? message, selectedId;
+  String? networkError;
   List<dynamic> devices = [];
   Map<String, String>? credentials;
   NetworkStatus? status;
@@ -44,16 +45,35 @@ class _WifiPageState extends State<WifiPage> {
   }
 
   Future<void> checkStatus() async {
-    if (busy || checking || !widget.ble.ready) return;
+    if (busy || checking) return;
+    if (!widget.ble.ready) {
+      if (mounted) {
+        setState(() {
+          status = null;
+          networkError =
+              'Соединение по Bluetooth прервано. Подключись к ESP32 заново.';
+        });
+      }
+      return;
+    }
     checking = true;
     try {
       final result = await widget.ble.networkStatus();
-      if (mounted) setState(() => status = result);
-    } catch (_) {
-      if (mounted && status == null) {
-        setState(
-          () => message = 'Нет статуса сети. Для настройки Wi-Fi нужна новая прошивка ESP32.',
-        );
+      if (mounted) {
+        setState(() {
+          status = result;
+          networkError = null;
+        });
+      }
+    } catch (error) {
+      debugPrint('BLE network status read failed: $error');
+      if (mounted) {
+        setState(() {
+          status = null;
+          networkError = error is TimeoutException
+              ? 'ESP32 не ответила на запрос статуса сети. Проверь Bluetooth-связь и повтори.'
+              : 'Не удалось прочитать статус сети по Bluetooth. После перепрошивки переподключись к плате; при необходимости забудь ESP32 в настройках Bluetooth телефона и выполни сопряжение заново.';
+        });
       }
     } finally {
       checking = false;
@@ -274,6 +294,16 @@ class _WifiPageState extends State<WifiPage> {
         if (busy) const LinearProgressIndicator(),
         if (message != null)
           Padding(padding: const EdgeInsets.all(12), child: Text(message!)),
+        if (networkError != null) ...[
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(networkError!),
+          ),
+          TextButton(
+            onPressed: busy || checking ? null : checkStatus,
+            child: const Text('Повторить чтение статуса'),
+          ),
+        ],
       ],
     ),
   );
